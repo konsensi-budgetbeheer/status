@@ -1,15 +1,18 @@
 import { NextResponse } from 'next/server';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { saveIncident, getActiveIncidents } from '@/lib/store';
 import type { Incident, IncidentImpact } from '@/types/status';
 
 /**
  * Sentry webhook receiver.
- * Sentry → Settings → Integrations → Internal Integration → Webhooks
+ * Sentry → Settings → Custom Integrations → Konsensi Status Page.
  *
- * Beveiliging: shared secret in `Authorization` header.
- *   Set SENTRY_WEBHOOK_SECRET in Vercel env vars.
+ * Authenticatie: Sentry signed HMAC-SHA256 van de body met de Internal
+ * Integration's clientSecret. We accepteren ook een eigen Bearer token
+ * voor handmatige tests (curl, postman).
+ *   SENTRY_WEBHOOK_SECRET = clientSecret van de Sentry Internal Integration.
  *
- * Sentry stuurt verschillende event types: issue.created, issue.resolved, alert.triggered, etc.
+ * Sentry stuurt event types: issue.created, issue.resolved, error.created.
  * We mappen "issue.created" met error niveau → incident, "issue.resolved" → resolved.
  */
 export const dynamic = 'force-dynamic';
@@ -32,14 +35,28 @@ interface SentryPayload {
   };
 }
 
-function authorize(request: Request): boolean {
+function verifySentrySignature(secret: string, body: string, signature: string): boolean {
+  if (!signature) return false;
+  const expected = createHmac('sha256', secret).update(body, 'utf8').digest('hex');
+  const a = Buffer.from(signature, 'utf8');
+  const b = Buffer.from(expected, 'utf8');
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+function authorize(request: Request, rawBody: string): boolean {
   const expected = process.env.SENTRY_WEBHOOK_SECRET;
   if (!expected) return process.env.NODE_ENV !== 'production';
 
-  const auth = request.headers.get('authorization') || '';
-  const sentryAuth = request.headers.get('sentry-hook-signature') || '';
+  // Sentry: sentry-hook-signature = HMAC-SHA256(body, clientSecret)
+  const sentrySig = request.headers.get('sentry-hook-signature') || '';
+  if (sentrySig && verifySentrySignature(expected, rawBody, sentrySig)) {
+    return true;
+  }
 
-  return auth === `Bearer ${expected}` || sentryAuth === expected;
+  // Fallback: handmatige tests via Bearer token
+  const auth = request.headers.get('authorization') || '';
+  return auth === `Bearer ${expected}`;
 }
 
 function levelToImpact(level?: string): IncidentImpact {
@@ -54,13 +71,15 @@ function levelToImpact(level?: string): IncidentImpact {
 }
 
 export async function POST(request: Request) {
-  if (!authorize(request)) {
+  const rawBody = await request.text();
+
+  if (!authorize(request, rawBody)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   let payload: SentryPayload;
   try {
-    payload = await request.json();
+    payload = JSON.parse(rawBody) as SentryPayload;
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
