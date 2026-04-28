@@ -34,11 +34,13 @@ async function set<T>(key: string, value: T): Promise<void> {
 // === Incidents ===
 
 export async function getActiveIncidents(): Promise<Incident[]> {
-  return (await get<Incident[]>('incidents:active')) ?? [];
+  const raw = await get<unknown>('incidents:active');
+  return Array.isArray(raw) ? (raw as Incident[]) : [];
 }
 
 export async function getIncidentHistory(): Promise<Incident[]> {
-  return (await get<Incident[]>('incidents:history')) ?? [];
+  const raw = await get<unknown>('incidents:history');
+  return Array.isArray(raw) ? (raw as Incident[]) : [];
 }
 
 export async function saveIncident(incident: Incident): Promise<void> {
@@ -174,7 +176,8 @@ export async function getUptimeWindow(serviceId: string): Promise<{
 // === Subscribers ===
 
 export async function getSubscribers(): Promise<Subscriber[]> {
-  return (await get<Subscriber[]>('subscribers')) ?? [];
+  const raw = await get<unknown>('subscribers');
+  return Array.isArray(raw) ? (raw as Subscriber[]) : [];
 }
 
 export async function saveSubscriber(sub: Subscriber): Promise<void> {
