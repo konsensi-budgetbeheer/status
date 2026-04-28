@@ -1,14 +1,20 @@
 import { SERVICES, SERVICE_GROUPS } from '@/data/services';
-import { getActiveIncidents, getIncidentHistory, getServiceState } from '@/lib/store';
+import {
+  getActiveIncidents,
+  getIncidentHistory,
+  getServiceState,
+  getUptimeWindow,
+} from '@/lib/store';
 import {
   computeOverallStatus,
   formatDateTime,
   impactLabel,
-  statusBg,
   statusColor,
   statusLabel,
 } from '@/lib/status-helpers';
 import type { ServiceState, Service } from '@/types/status';
+import { UptimeBars } from './components/UptimeBars';
+import { SubscribeButton } from './components/SubscribeButton';
 
 export const revalidate = 30;
 
@@ -31,68 +37,87 @@ export default async function StatusPage() {
     })
   );
 
+  const uptimes = await Promise.all(
+    SERVICES.map(async (s) => ({
+      serviceId: s.id,
+      ...(await getUptimeWindow(s.id)),
+    }))
+  );
+
   const overall = computeOverallStatus(states, activeIncidents);
 
   const stateById = new Map<string, ServiceState>(states.map((s) => [s.serviceId, s]));
+  const uptimeById = new Map(uptimes.map((u) => [u.serviceId, u]));
   const groupedServices = SERVICES.reduce<Record<string, Service[]>>((acc, s) => {
     (acc[s.group] ??= []).push(s);
     return acc;
   }, {});
 
+  const overallBg =
+    overall.status === 'operational'
+      ? 'bg-emerald-600'
+      : overall.status === 'degraded'
+        ? 'bg-yellow-500'
+        : overall.status === 'partial_outage'
+          ? 'bg-orange-500'
+          : overall.status === 'maintenance'
+            ? 'bg-blue-500'
+            : 'bg-red-600';
+
+  const overallHeadline =
+    overall.status === 'operational' ? 'Alle systemen werken normaal' : overall.message;
+
   return (
-    <main className="mx-auto max-w-3xl px-4 py-12 sm:py-16">
-      <header className="mb-10">
-        <div className="flex items-center gap-3 mb-1">
-          <div className="size-8 rounded-lg bg-emerald-600 flex items-center justify-center">
-            <span className="text-white font-bold text-sm">K</span>
+    <main className="mx-auto max-w-4xl px-4 py-12 sm:py-16">
+      {/* Header */}
+      <header className="flex items-start justify-between gap-4 mb-12">
+        <div className="flex items-center gap-3">
+          <div className="size-9 rounded-lg bg-emerald-600 flex items-center justify-center">
+            <span className="text-white font-bold">K</span>
           </div>
-          <h1 className="text-xl font-semibold text-neutral-900 dark:text-neutral-100">
-            Konsensi Status
-          </h1>
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Konsensi Status</h1>
+            <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-0.5">
+              Live status van Konsensi Budgetbeheer diensten
+            </p>
+          </div>
         </div>
-        <p className="text-sm text-neutral-500 dark:text-neutral-400">
-          Live status van Konsensi Budgetbeheer diensten
-        </p>
+        <SubscribeButton />
       </header>
 
+      {/* Overall status banner */}
       <section
-        className={`mb-8 rounded-2xl border p-6 ${statusBg(overall.status)}`}
+        className={`mb-12 rounded-lg ${overallBg} text-white px-6 py-5 shadow-sm`}
         aria-live="polite"
       >
-        <div className="flex items-center gap-3">
-          <span className={`inline-block size-3 rounded-full ${statusColor(overall.status)}`} />
-          <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
-            {overall.message}
-          </h2>
-        </div>
+        <h2 className="text-lg font-semibold">{overallHeadline}</h2>
       </section>
 
+      {/* Active incidents */}
       {activeIncidents.length > 0 && (
-        <section className="mb-10">
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400 mb-3">
+        <section className="mb-12">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400 mb-3">
             Actieve incidenten
           </h3>
           <div className="space-y-4">
             {activeIncidents.map((incident) => (
               <article
                 key={incident.id}
-                className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5"
+                className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5"
               >
                 <div className="flex items-start justify-between gap-3 mb-3">
                   <div>
-                    <h4 className="font-semibold text-neutral-900 dark:text-neutral-100">
-                      {incident.title}
-                    </h4>
+                    <h4 className="font-semibold">{incident.title}</h4>
                     <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
-                      Begonnen {formatDateTime(incident.startedAt)} · Impact:{' '}
+                      Begonnen {formatDateTime(incident.startedAt)} · Impact{' '}
                       {impactLabel(incident.impact)}
                     </p>
                   </div>
-                  <span className="text-xs font-medium px-2 py-1 rounded-md bg-orange-100 dark:bg-orange-950 text-orange-700 dark:text-orange-300">
+                  <span className="text-xs font-medium px-2 py-1 rounded-md bg-orange-100 dark:bg-orange-950 text-orange-700 dark:text-orange-300 capitalize">
                     {incident.status}
                   </span>
                 </div>
-                <ul className="space-y-2 border-l border-neutral-200 dark:border-neutral-800 pl-4">
+                <ul className="space-y-2 border-l-2 border-neutral-200 dark:border-neutral-800 pl-4">
                   {[...incident.updates].reverse().map((u) => (
                     <li key={u.id} className="text-sm">
                       <span className="text-neutral-500 dark:text-neutral-400 text-xs block">
@@ -108,59 +133,63 @@ export default async function StatusPage() {
         </section>
       )}
 
-      <section className="mb-12">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400 mb-3">
+      {/* Uptime over the past 90 days header */}
+      <div className="flex items-baseline justify-between mb-4">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
           Diensten
         </h3>
-        <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-hidden">
-          {Object.entries(groupedServices).map(([group, services], gi) => (
-            <div key={group}>
-              {gi > 0 && <div className="border-t border-neutral-200 dark:border-neutral-800" />}
-              <div className="px-5 py-2 bg-neutral-50 dark:bg-neutral-950/50 text-xs font-medium text-neutral-500 dark:text-neutral-400">
-                {SERVICE_GROUPS[group as keyof typeof SERVICE_GROUPS]}
-              </div>
-              {services.map((s, i) => {
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+          Uptime over de afgelopen 90 dagen
+        </p>
+      </div>
+
+      {/* Services with uptime bars per service */}
+      <section className="space-y-8 mb-16">
+        {Object.entries(groupedServices).map(([group, services]) => (
+          <div key={group}>
+            <p className="text-[11px] uppercase tracking-wider font-semibold text-neutral-400 dark:text-neutral-500 mb-3">
+              {SERVICE_GROUPS[group as keyof typeof SERVICE_GROUPS]}
+            </p>
+            <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 divide-y divide-neutral-100 dark:divide-neutral-800">
+              {services.map((s) => {
                 const state = stateById.get(s.id);
+                const uptime = uptimeById.get(s.id);
                 const status = state?.status ?? 'operational';
                 return (
-                  <div
-                    key={s.id}
-                    className={`flex items-center justify-between gap-3 px-5 py-3 ${
-                      i < services.length - 1
-                        ? 'border-b border-neutral-100 dark:border-neutral-800/60'
-                        : ''
-                    }`}
-                  >
-                    <div className="min-w-0">
-                      <p className="font-medium text-neutral-900 dark:text-neutral-100">{s.name}</p>
-                      <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate">
-                        {s.description}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {state?.responseTime !== undefined && (
-                        <span className="text-xs text-neutral-400 tabular-nums">
-                          {state.responseTime}ms
+                  <div key={s.id} className="px-5 py-5">
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-neutral-900 dark:text-neutral-100">
+                          {s.name}
+                        </p>
+                        <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate">
+                          {s.description}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span
+                          className={`inline-block size-2.5 rounded-full ${statusColor(status)}`}
+                        />
+                        <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+                          {statusLabel(status)}
                         </span>
-                      )}
-                      <span
-                        className={`inline-block size-2.5 rounded-full ${statusColor(status)}`}
-                      />
-                      <span className="text-sm text-neutral-600 dark:text-neutral-400 hidden sm:inline">
-                        {statusLabel(status)}
-                      </span>
+                      </div>
                     </div>
+                    {uptime && (
+                      <UptimeBars days={uptime.days} uptimePercent={uptime.uptimePercent} />
+                    )}
                   </div>
                 );
               })}
             </div>
-          ))}
-        </div>
+          </div>
+        ))}
       </section>
 
+      {/* History */}
       {history.length > 0 && (
         <section className="mb-12">
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400 mb-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400 mb-3">
             Recente incidenten
           </h3>
           <ul className="space-y-2">
@@ -187,7 +216,8 @@ export default async function StatusPage() {
         </section>
       )}
 
-      <footer className="text-center text-xs text-neutral-500 dark:text-neutral-400">
+      {/* Footer */}
+      <footer className="text-center text-xs text-neutral-500 dark:text-neutral-400 pt-8 border-t border-neutral-200 dark:border-neutral-800">
         <p>
           Vragen? Mail{' '}
           <a
@@ -196,8 +226,7 @@ export default async function StatusPage() {
           >
             support@konsensi-budgetbeheer.nl
           </a>
-        </p>
-        <p className="mt-1">
+          {' · '}
           <a
             href="https://app.konsensi-budgetbeheer.nl"
             className="underline hover:text-neutral-700 dark:hover:text-neutral-200"

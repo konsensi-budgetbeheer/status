@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 import { SERVICES } from '@/data/services';
-import { saveServiceState, getActiveIncidents, saveIncident } from '@/lib/store';
+import {
+  saveServiceState,
+  getActiveIncidents,
+  saveIncident,
+  recordDailyPing,
+} from '@/lib/store';
 import type { ServiceStatus, Incident } from '@/types/status';
 
 /**
@@ -79,6 +84,8 @@ export async function POST(request: Request) {
         lastChecked: now,
         lastIncidentAt: status !== 'operational' ? now : undefined,
       });
+
+      await recordDailyPing(service.id, status, responseTime);
 
       return { serviceId: service.id, status, responseTime };
     })

@@ -42,3 +42,31 @@ export interface OverallStatus {
   status: ServiceStatus;
   message: string;
 }
+
+/**
+ * Eén dag uptime data per service.
+ * `date` = YYYY-MM-DD
+ * `status` = aggregaat van alle pings die dag (worst case)
+ * `checks` / `failures` voor uptime-% berekening
+ */
+export interface DailyUptime {
+  date: string;
+  status: ServiceStatus;
+  checks: number;
+  failures: number;
+  avgResponseTime?: number;
+}
+
+export interface ServiceUptimeWindow {
+  serviceId: string;
+  days: DailyUptime[]; // 90 entries, oudste eerst
+  uptimePercent: number;
+}
+
+export interface Subscriber {
+  email: string;
+  subscribedAt: string;
+  confirmed: boolean;
+  confirmToken: string;
+  unsubscribeToken: string;
+}
